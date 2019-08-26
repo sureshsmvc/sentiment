@@ -1,0 +1,167 @@
+{
+	"properties": {},
+	"description": "",
+	"processes": {
+		"python3operator1": {
+			"component": "com.sap.system.python3Operator",
+			"metadata": {
+				"label": "Python3 Operator",
+				"x": 221.99999904632568,
+				"y": 80,
+				"height": 80,
+				"width": 120,
+				"extensible": true,
+				"config": {
+					"script": "import pandas as pd\nimport re\nimport io\n\ncounter = 0\nmovies = pd.DataFrame(columns=[\"review\", \"sentiment\"])\nTAG_RE = re.compile(r'<[^>]+>')\n\ndef preprocess_text(sen):\n    sentence = remove_tags(sen)\n    sentence = re.sub('[^a-zA-Z]', ' ', sentence)\n    sentence = re.sub(r\"\\s+[a-zA-Z]\\s+\", ' ', sentence)\n    sentence = re.sub(r'\\s+', ' ', sentence)\n    return sentence\n\ndef remove_tags(text):\n    return TAG_RE.sub('', text)\n    \ndef on_input(data):\n    global counter\n    posneg = None\n    if str(data.attributes[\"storage.path\"]).find(\"pos\") != -1:\n        posneg = \"positive\"\n    elif str(data.attributes[\"storage.path\"]).find(\"neg\") != -1:\n        posneg = \"negative\"\n        \n    review = data.body.decode(\"utf-8\")\n    movies.loc[counter] = [preprocess_text(review), posneg]\n    counter += 1\n    api.send(\"outlog\", \"Review: {} | Sentiment: {}\".format(review[0:10], posneg))\n\n    if counter == 1000:\n        api.send(\"outlog\", \"Columns: \"+str(movies.columns))\n        api.send(\"outlog\", \"---------------------HEAD----------------------------\")\n        api.send(\"outlog\", str(movies.head()))\n        api.send(\"outlog\", \"--------------------------------------------------------\")\n        api.send(\"outlog\", \"---------------------TAIL----------------------------\")\n        api.send(\"outlog\", str(movies.tail()))\n        api.send(\"outlog\", \"--------------------------------------------------------\")\n        api.send(\"outlog\", \"Total No of Reviews: \"+str(movies.shape[0]))\n        buffer=io.StringIO()\n        movies.to_csv(buffer, index = None, header=True)\n        b = bytes(buffer.getvalue(), encoding='utf-8')\n        api.send(\"outlog\", \"File Size: \"+str(len(b)))\n        api.send(\"outartifact\", b)\n\napi.set_port_callback(\"input\", on_input)"
+				},
+				"additionalinports": [
+					{
+						"name": "input",
+						"type": "message"
+					}
+				],
+				"additionaloutports": [
+					{
+						"name": "outartifact",
+						"type": "blob"
+					},
+					{
+						"name": "outlog",
+						"type": "message"
+					}
+				]
+			}
+		},
+		"readfile1": {
+			"component": "com.sap.storage.read",
+			"metadata": {
+				"label": "Read File",
+				"x": 17,
+				"y": 72,
+				"height": 80,
+				"width": 120,
+				"config": {
+					"service": "S3",
+					"awsConnection": {
+						"configurationType": "Configuration Manager",
+						"connectionID": "S3_SENTIMENT"
+					},
+					"awsBucket": "sapdi",
+					"path": "/sentiment/",
+					"recursive": true,
+					"pattern": ".*txt",
+					"deleteAfterSend": false,
+					"onlyReadOnChange": true
+				}
+			}
+		},
+		"graphterminator1": {
+			"component": "com.sap.util.graphTerminator",
+			"metadata": {
+				"label": "Graph Terminator",
+				"x": 667.9999961853027,
+				"y": 72,
+				"height": 80,
+				"width": 120,
+				"config": {}
+			}
+		},
+		"wiretap2": {
+			"component": "com.sap.util.wiretap",
+			"metadata": {
+				"label": "Wiretap",
+				"x": 482.99999713897705,
+				"y": 132,
+				"height": 80,
+				"width": 120,
+				"ui": "dynpath",
+				"config": {}
+			}
+		},
+		"writefile1": {
+			"component": "com.sap.storage.write",
+			"metadata": {
+				"label": "Write File",
+				"x": 482.99999713897705,
+				"y": 12,
+				"height": 80,
+				"width": 120,
+				"config": {
+					"service": "SDL",
+					"mode": "create",
+					"path": "/worm/sentiment/movies.csv"
+				}
+			}
+		}
+	},
+	"groups": [
+		{
+			"name": "group1",
+			"nodes": [
+				"python3operator1"
+			],
+			"metadata": {
+				"description": "Group"
+			},
+			"tags": {
+				"pandas": "0.25.1"
+			}
+		}
+	],
+	"connections": [
+		{
+			"metadata": {
+				"points": "141,121 168.99999952316284,121 168.99999952316284,120 216.99999904632568,120"
+			},
+			"src": {
+				"port": "outFile",
+				"process": "readfile1"
+			},
+			"tgt": {
+				"port": "input",
+				"process": "python3operator1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "345.9999990463257,111 373.9999985694885,111 373.9999985694885,114.5 449.9999976158142,114.5 449.9999976158142,52 477.99999713897705,52"
+			},
+			"src": {
+				"port": "outartifact",
+				"process": "python3operator1"
+			},
+			"tgt": {
+				"port": "inFile",
+				"process": "writefile1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "606.999997138977,52 634.9999966621399,52 634.9999966621399,112 662.9999961853027,112"
+			},
+			"src": {
+				"port": "outFilename",
+				"process": "writefile1"
+			},
+			"tgt": {
+				"port": "stop",
+				"process": "graphterminator1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "345.9999990463257,129 373.9999985694885,129 373.9999985694885,125.5 449.9999976158142,125.5 449.9999976158142,172 477.99999713897705,172"
+			},
+			"src": {
+				"port": "outlog",
+				"process": "python3operator1"
+			},
+			"tgt": {
+				"port": "in",
+				"process": "wiretap2"
+			}
+		}
+	],
+	"inports": {},
+	"outports": {}
+}
