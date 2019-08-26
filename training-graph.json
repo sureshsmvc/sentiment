@@ -1,0 +1,161 @@
+{
+	"properties": {},
+	"description": "i303558-26aug - sentiment-training",
+	"processes": {
+		"tostringconverter1": {
+			"component": "com.sap.util.toStringConverter",
+			"metadata": {
+				"label": "ToString Converter",
+				"x": 416.49999809265137,
+				"y": 147,
+				"height": 50,
+				"width": 50,
+				"config": {}
+			}
+		},
+		"wiretap1": {
+			"component": "com.sap.util.wiretap",
+			"metadata": {
+				"label": "Wiretap",
+				"x": 196.99999904632568,
+				"y": 27,
+				"height": 80,
+				"width": 120,
+				"ui": "dynpath",
+				"config": {}
+			}
+		},
+		"workflowterminator1": {
+			"component": "com.sap.dh.terminator",
+			"metadata": {
+				"label": "Workflow Terminator",
+				"x": 735.999997138977,
+				"y": 132,
+				"height": 80,
+				"width": 120,
+				"config": {}
+			}
+		},
+		"wiretap3": {
+			"component": "com.sap.util.wiretap",
+			"metadata": {
+				"label": "Wiretap",
+				"x": 566.999997138977,
+				"y": 132,
+				"height": 80,
+				"width": 120,
+				"ui": "dynpath",
+				"config": {}
+			}
+		},
+		"tomessageconverter1": {
+			"component": "com.sap.util.toMessageConverter",
+			"metadata": {
+				"label": "ToMessage Converter",
+				"x": 231.49999904632568,
+				"y": 147,
+				"height": 50,
+				"width": 50,
+				"config": {}
+			}
+		},
+		"training1": {
+			"component": "com.sap.ml.training",
+			"metadata": {
+				"label": "Training",
+				"x": -25,
+				"y": 67,
+				"height": 80,
+				"width": 120,
+				"extensible": false,
+				"config": {
+					"script": "import tensorflow as tf\nimport pandas as pd\nimport numpy as np\nimport re\nfrom numpy import array\nfrom keras.preprocessing.sequence import pad_sequences\nfrom keras.models import Sequential\nfrom keras.layers.core import Activation, Dropout, Dense\nfrom keras.layers.embeddings import Embedding\nfrom sklearn.model_selection import train_test_split\nfrom keras.preprocessing.text import Tokenizer\nimport sklearn\nimport os\nfrom keras.models import load_model\nfrom keras import backend as K\nfrom keras import backend as K\nfrom keras.models import Sequential\nfrom keras.layers import Dense, Embedding, LSTM, GRU\nfrom keras.layers.embeddings import Embedding\nfrom keras.layers import Bidirectional\nimport shutil\nimport sapdi\n\nTAG_RE = re.compile(r'<[^>]+>')\n\nclass Sentiment():\n    def remove_tags(self,text):\n        return TAG_RE.sub('', text)\n    \n    def preprocess_text(self,sen):\n        # Removing html tags\n        sentence = self.remove_tags(sen)\n        # Remove punctuations and numbers\n        sentence = re.sub('[^a-zA-Z]', ' ', sentence)\n        # Single character removal\n        sentence = re.sub(r\"\\s+[a-zA-Z]\\s+\", ' ', sentence)\n        # Removing multiple spaces\n        sentence = re.sub(r'\\s+', ' ', sentence)\n        return sentence\n\n    def copytree(self,src, dst, symlinks=False, ignore=None):\n        for item in os.listdir(src):\n            s = os.path.join(src, item)\n            d = os.path.join(dst, item)\n            if os.path.isdir(s):\n                shutil.copytree(s, d, symlinks, ignore)\n            else:\n                shutil.copy2(s, d)   \n\n    def train(self):\n        print(\"start of sentiment training ..\")\n\n        #dataset_artefacts_path = \"data\"\n\n        data_artifact = sapdi.get_artifact(\"SENTIMENTDATA\")\n        dataset_artefacts_path = data_artifact.get_path()\n\n        dataset_artefact_file = \"movies.csv\"\n        inputs_csv_path = dataset_artefacts_path + \"/\" + dataset_artefact_file\n\n        print(\"the input movies path ..\",inputs_csv_path)\n\n        movie_reviews = pd.read_csv(inputs_csv_path)\n        movie_reviews = sklearn.utils.shuffle(movie_reviews)\n        movie_reviews = movie_reviews.head(1000)\n        movie_reviews.shape\n\n        X = []\n        sentences = list(movie_reviews['review'])\n\n        for sen in sentences:\n            X.append(self.preprocess_text(sen))\n        \n        y = movie_reviews['sentiment']\n        y = np.array(list(map(lambda x: 1 if x==\"positive\" else (0 if x==\"negative\" else x), y)))\n        \n        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20)\n        \n        tokenizer = Tokenizer(num_words=5000)\n        tokenizer.fit_on_texts(X_train)\n\n        X_train = tokenizer.texts_to_sequences(X_train)\n        X_test = tokenizer.texts_to_sequences(X_test)\n        \n        vocab_size = len(tokenizer.word_index) + 1\n        maxlen = 100\n        \n        \n        X_train = pad_sequences(X_train, padding='post', maxlen=maxlen)\n        X_test = pad_sequences(X_test, padding='post', maxlen=maxlen)\n        EMBEDDING_DIM = 100\n        \n        model = Sequential()\n        model.add(Embedding(vocab_size, EMBEDDING_DIM, input_length=maxlen))\n        model.add(LSTM(units=128, dropout=0.2, recurrent_dropout=0.2))\n        model.add(Dense(1, activation='sigmoid'))\n        model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])\n        model.summary()\n        model.fit(X_train, y_train, batch_size=64, epochs=10, validation_data=(X_test, y_test ), verbose=2)\n        os.makedirs('./model', exist_ok=True)\n        model.save('./model/sentiment.h5')\n        model = load_model('./model/sentiment.h5')\n        print(model.outputs)\n        print(model.inputs)\n\n\n        signature = tf.saved_model.signature_def_utils.predict_signature_def(inputs={'X': model.input}, outputs={'scores': model.output})\n        \n        out_artifact = sapdi.create_artifact(\"SENTIMENTMODEL\", artifact_kind=sapdi.artifact.ArtifactKind.MODEL,file_type=sapdi.artifact.ArtifactFileType.ZIP, description=\"Best model ever\", artifact_name=\"sentiment\")\n        model_path = out_artifact.get_path()\n\n        builder = tf.saved_model.builder.SavedModelBuilder(\"./saved_tf\")\n        builder.add_meta_graph_and_variables(sess=K.get_session(),tags=[tf.saved_model.tag_constants.SERVING],                                      \n        signature_def_map={                                      \n            tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:                           \n            signature                       \n        })                                      \n        builder.save()\n        self.copytree(\"./saved_tf\", model_path)\n        print(\"end of sentiment training ..\")\n    \ns = Sentiment()\ns.train()",
+					"resourcePlan": "basic",
+					"requirements": "tensorflow==1.11.0,pandas==0.25.0,keras==2.2.4,scikit-learn==0.21.3",
+					"artifacts": [
+						{
+							"name": "SENTIMENTDATA",
+							"artifactId": "cd847c09-f22b-4c87-ba5f-8bc58402be8e"
+						}
+					]
+				},
+				"additionaloutports": [
+					{
+						"name": "SENTIMENTMODEL",
+						"type": "message.artifact"
+					}
+				]
+			}
+		}
+	},
+	"groups": [],
+	"connections": [
+		{
+			"metadata": {
+				"points": "470.49999809265137,172 561.999997138977,172"
+			},
+			"src": {
+				"port": "outstring",
+				"process": "tostringconverter1"
+			},
+			"tgt": {
+				"port": "in",
+				"process": "wiretap3"
+			}
+		},
+		{
+			"metadata": {
+				"points": "690.999997138977,172 730.999997138977,172"
+			},
+			"src": {
+				"port": "out",
+				"process": "wiretap3"
+			},
+			"tgt": {
+				"port": "stop",
+				"process": "workflowterminator1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "285.4999990463257,172 348.9999985694885,172 348.9999985694885,163 411.49999809265137,163"
+			},
+			"src": {
+				"port": "out",
+				"process": "tomessageconverter1"
+			},
+			"tgt": {
+				"port": "ininterface",
+				"process": "tostringconverter1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "99,98 145.5,98 145.5,67 191.99999904632568,67"
+			},
+			"src": {
+				"port": "logs",
+				"process": "training1"
+			},
+			"tgt": {
+				"port": "in",
+				"process": "wiretap1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "99,116 162.75,116 162.75,163 226.49999904632568,163"
+			},
+			"src": {
+				"port": "SENTIMENTMODEL",
+				"process": "training1"
+			},
+			"tgt": {
+				"port": "inbody",
+				"process": "tomessageconverter1"
+			}
+		}
+	],
+	"inports": {},
+	"outports": {}
+}
