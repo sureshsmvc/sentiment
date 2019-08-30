@@ -1,0 +1,112 @@
+{
+	"properties": {},
+	"description": "i303558-26aug - sentiment-inference-use",
+	"processes": {
+		"python3operator1": {
+			"component": "com.sap.system.python3Operator",
+			"metadata": {
+				"label": "Python3 Operator",
+				"x": 423,
+				"y": 111,
+				"height": 80,
+				"width": 120,
+				"extensible": true,
+				"config": {
+					"script": "from keras.preprocessing.text import Tokenizer\nfrom keras.preprocessing.sequence import pad_sequences\nimport numpy\nimport requests\nimport codecs,json\nimport re\n\nTAG_RE = re.compile(r'<[^>]+>')\n\ndef preprocess_text(sen):\n    # Removing html tags\n    sentence = remove_tags(sen)\n    # Remove punctuations and numbers\n    sentence = re.sub('[^a-zA-Z]', ' ', sentence)\n    # Single character removal\n    sentence = re.sub(r\"\\s+[a-zA-Z]\\s+\", ' ', sentence)\n    # Removing multiple spaces\n    sentence = re.sub(r'\\s+', ' ', sentence)\n    return sentence\n\ndef remove_tags(text):\n    return TAG_RE.sub('', text)\n\ndef on_input(data):\n    storagepath = str(data.attributes[\"storage.path\"])\n    X1 =['''test''']\n    X1[0] = preprocess_text(data.body.decode(\"utf-8\"))\n    tokenizer = Tokenizer(num_words=5000)\n    tokenizer.fit_on_texts(X1)\n    X = tokenizer.texts_to_sequences(X1)\n    X = pad_sequences(X, padding='post', maxlen=100)\n    req = generateInferenceRequest(X)\n    \n    response = requests.post(\"<DEPLOYMENT URL>\", data=req,headers={\"Content-Type\": \"application/json\", \"Authorization\": \"Basic <tenantid/userid:password>\"})\n    result = storagepath + \"\\n\" + X1[0] + \"\\n\" + req + \"\\n\" +  json.dumps(response.json()) + \"\\n\\n\"\n    api.send(\"output\", result)\n\n\ndef generateInferenceRequest(X):\n    ENCODING = 'utf-8'\n    req={}\n    req['signature_name'] = \"serving_default\"\n    req['inputs']={}\n    file_path = \"./path.json\" ## your path variable\n    json.dump(X.tolist(), codecs.open(file_path, 'w', encoding='utf-8'), separators=(',', ':'), sort_keys=True, indent=4) \n    obj_text = codecs.open(file_path, 'r', encoding='utf-8').read()\n    b_new = json.loads(obj_text)\n    req['inputs']['X']=b_new\n    req = json.dumps(req) \n    return req\n    \napi.set_port_callback(\"input\", on_input)\n\n\n"
+				},
+				"additionalinports": [
+					{
+						"name": "input",
+						"type": "message"
+					}
+				],
+				"additionaloutports": [
+					{
+						"name": "output",
+						"type": "string"
+					}
+				]
+			}
+		},
+		"wiretap1": {
+			"component": "com.sap.util.wiretap",
+			"metadata": {
+				"label": "Wiretap",
+				"x": 623,
+				"y": 111,
+				"height": 80,
+				"width": 120,
+				"ui": "dynpath",
+				"config": {}
+			}
+		},
+		"readfile1": {
+			"component": "com.sap.storage.read",
+			"metadata": {
+				"label": "Read File",
+				"x": 210,
+				"y": 106,
+				"height": 80,
+				"width": 120,
+				"config": {
+					"service": "S3",
+					"awsConnection": {
+						"configurationType": "Configuration Manager",
+						"connectionID": "S3_SENTIMENT"
+					},
+					"awsBucket": "sapdi",
+					"path": "/predict/",
+					"pattern": ".*txt",
+					"onlyReadOnChange": true
+				}
+			}
+		}
+	},
+	"groups": [
+		{
+			"name": "group1",
+			"nodes": [
+				"python3operator1"
+			],
+			"metadata": {
+				"description": "Group"
+			},
+			"tags": {
+				"keras": "2.2.4",
+				"requests": "2.18.4",
+				"tensorflow": "1.11.0",
+				"pandas": "0.25.1"
+			}
+		}
+	],
+	"connections": [
+		{
+			"metadata": {
+				"points": "547,151 618,151"
+			},
+			"src": {
+				"port": "output",
+				"process": "python3operator1"
+			},
+			"tgt": {
+				"port": "in",
+				"process": "wiretap1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "334,155 376,155 376,151 418,151"
+			},
+			"src": {
+				"port": "outFile",
+				"process": "readfile1"
+			},
+			"tgt": {
+				"port": "input",
+				"process": "python3operator1"
+			}
+		}
+	],
+	"inports": {},
+	"outports": {}
+}
